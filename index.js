@@ -115,6 +115,27 @@ async function run() {
     }
   });
 
+  /// Patch route to update pet adoption status
+app.patch('/pets/:petId', async (req, res) => {
+  const { petId } = req.params;
+
+
+  try {
+    // Update adopted status for the pet in the database
+    const updatedPet = await addedPetCollection.findOneAndUpdate(
+      { _id: new ObjectId(petId) },  // Find pet by ObjectId
+      { $set: { adopted: req.body.adopted } }, // Update adopted status
+      { returnDocument: 'after' } // Return the updated document
+    );
+
+    res.status(200).json(updatedPet.value);
+  } catch (error) {
+    console.error('Error updating pet:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
   console.log("Pinged your deployment. You successfully connected to MongoDB!");
 } finally {
   // Ensures that the client will close when you finish/error
