@@ -73,6 +73,11 @@ async function run() {
     }
   });
 
+  app.get('/pets',async(req,res)=>{
+    const result = await addedPetCollection.find().toArray()
+    res.send(result)
+  })
+
   // Delete pet by ID
   app.delete('/pets/:id', async (req, res) => {
     try {
@@ -88,6 +93,13 @@ async function run() {
     }
   });
 
+   app.get('/pets/:id',async(req,res)=>{
+    const petId = new ObjectId(req.params.id);
+    const query = {_id: new ObjectId(petId)}
+    const result = await addedPetCollection.findOne(query)
+    res.send(result)
+   })
+
   // Update pet by ID
   app.put('/pets/:id', async (req, res) => {
     try {
@@ -97,11 +109,7 @@ async function run() {
         { $set: req.body },
         { returnDocument: 'after' }  // Return the updated document
       );
-
-      if (!updatedPet.value) {
-        return res.status(404).send('Pet not found');
-      }
-      res.json(updatedPet.value);
+       res.json(updatedPet.value);
     } catch (err) {
       res.status(500).send('Error updating pet');
     }
