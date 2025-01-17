@@ -3,12 +3,14 @@ const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
+const morgan = require('morgan')
 
 const app = express();
 const port = process.env.PORT || 5000;
 // middleware
 app.use(cors());
 app.use(express.json());
+app.use(morgan('dev'))
 
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ju1bs.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -26,6 +28,7 @@ async function run() {
   try {
     const userCollection = client.db('petAdoption').collection('users')
     const addedPetCollection = client.db('petAdoption').collection('addedPets')
+    const addedDonationCollection = client.db('petAdoption').collection('addedDonations')
 
 
 
@@ -47,21 +50,31 @@ async function run() {
       const result = await addedPetCollection.insertOne(pet)
       return res.send(result)
     })
-    
+
+    // added donations
+    app.post('/donations',async(req,res)=>{
+      const donation = req.body
+      const result = await addedDonationCollection.insertOne(donation)
+      return res.send(result)
+    })
 
 
   // Fetch paginated pets
   app.get('/pets/my-pets', async (req, res) => {
+    const email = req.query.email
     const page = parseInt(req.query.page) || 0;
     const limit = parseInt(req.query.limit) || 10;
+    console.log(email,page,limit);
+
 
     try {
-      const pets = await addedPetCollection.find()
+      const pets = await addedPetCollection
+        .find({ email: email })
         .skip(page * limit)  // Skip the records based on the page number
         .limit(limit)        // Limit the number of records per page
         .toArray();
 
-      const totalPets = await addedPetCollection.countDocuments(); // Count the total number of pets
+      const totalPets = await addedPetCollection.countDocuments({ email: email }); // Count the total number of pets
       res.json({
         pets,
         totalPets,
@@ -72,9 +85,45 @@ async function run() {
       res.status(500).send('Error fetching pets');
     }
   });
+  
 
-  app.get('/pets',async(req,res)=>{
-    const result = await addedPetCollection.find().toArray()
+  app.get('/pets', async (req, res) => {
+    const { search = '', category = '', adopted } = req.query;
+  
+    // Prepare filter object
+    const filter = {};
+  
+    // Add search filter if a search term is provided
+    if (search) {
+      filter.name = { $regex: search, $options: 'i' }; // Case-insensitive search on pet name
+    }
+  
+    // Add category filter if provided
+    if (category) {
+      filter.category = category;
+    }
+  
+    // Add adopted status filter if provided (expecting a boolean value)
+    if (adopted !== undefined) {
+      // Convert 'adopted' to a boolean value (false -> false, true -> true)
+      filter.adopted = adopted === 'true'; // 'true' string to boolean true, 'false' string to boolean false
+    }
+  
+    try {
+      // Fetch all pets based on the filter, without pagination
+      const pets = await addedPetCollection.find(filter).toArray();
+  
+      // Send the response with all matching pets
+      res.json(pets);
+    } catch (err) {
+      res.status(500).send('Error fetching pets');
+    }
+  });
+  
+
+  //fetch donations
+  app.get('/donations/my-campaigns',async(req,res)=>{
+    const result = await addedDonationCollection.find().toArray()
     res.send(result)
   })
 
@@ -135,8 +184,6 @@ app.patch('/pets/:petId', async (req, res) => {
   }
 });
 
-
-  console.log("Pinged your deployment. You successfully connected to MongoDB!");
 } finally {
   // Ensures that the client will close when you finish/error
   // await client.close();
