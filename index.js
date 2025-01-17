@@ -29,6 +29,7 @@ async function run() {
     const userCollection = client.db('petAdoption').collection('users')
     const addedPetCollection = client.db('petAdoption').collection('addedPets')
     const addedDonationCollection = client.db('petAdoption').collection('addedDonations')
+    const adoptPetCollection = client.db('petAdoption').collection('adoptPets')
 
 
 
@@ -48,6 +49,12 @@ async function run() {
     app.post('/pets',async(req,res)=>{
       const pet = req.body
       const result = await addedPetCollection.insertOne(pet)
+      return res.send(result)
+    })
+
+    app.post('/adopt-pet',async(req,res)=>{
+      const adoptPet = req.body
+      const result = await adoptPetCollection.insertOne(adoptPet)
       return res.send(result)
     })
 
@@ -85,7 +92,7 @@ async function run() {
       res.status(500).send('Error fetching pets');
     }
   });
-  
+
 
   app.get('/pets', async (req, res) => {
     const { search = '', category = '', adopted } = req.query;
@@ -119,6 +126,13 @@ async function run() {
       res.status(500).send('Error fetching pets');
     }
   });
+
+  //fetch-pet-by-id
+  app.get('/pet-listing/:id',async(req,res)=>{
+    const petId = new ObjectId(req.params.id)
+    const result = await addedPetCollection.findOne({_id:petId})
+    return res.send(result)
+  })
   
 
   //fetch donations
