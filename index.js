@@ -72,9 +72,7 @@ async function run() {
     const page = parseInt(req.query.page) || 0;
     const limit = parseInt(req.query.limit) || 10;
     console.log(email,page,limit);
-
-
-    try {
+     try {
       const pets = await addedPetCollection
         .find({ email: email })
         .skip(page * limit)  // Skip the records based on the page number
@@ -92,6 +90,13 @@ async function run() {
       res.status(500).send('Error fetching pets');
     }
   });
+
+  //FETCH my donation page with email query
+  app.get('/donations/my-campaigns',async(req,res)=>{
+    const email = req.query.email
+    const myDonations = await addedDonationCollection.find({ email: email }).toArray()
+    res.send(myDonations)
+  })
 
 
   app.get('/pets', async (req, res) => {
@@ -163,6 +168,13 @@ async function run() {
     res.send(result)
    })
 
+   app.get('/donations/:id',async(req,res)=>{
+    const donationId = new ObjectId(req.params.id);
+    const query = {_id: new ObjectId(donationId)}
+    const result = await addedDonationCollection.findOne(query)
+    res.send(result)
+   })
+
   // Update pet by ID
   app.put('/pets/:id', async (req, res) => {
     try {
@@ -197,6 +209,36 @@ app.patch('/pets/:petId', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+//toggolepause and update api
+app.put('/dashboard/update-donation/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedFields = req.body; // Get the fields to update from the request body
+
+    // Find the existing campaign
+    const campaign = await addedDonationCollection.findOne({ _id: new ObjectId(id) });
+
+    // Merge updated fields with the toggled 'paused' field
+    const updatedData = {
+      ...updatedFields,
+      paused: updatedFields.paused !== undefined ? updatedFields.paused : !campaign.paused, // Toggle paused if not explicitly set
+    };
+
+    // Update the campaign
+    const result = await addedDonationCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedData }
+    );
+
+    res.send(result);
+  } catch (error) {
+    console.error("Error updating campaign:", error);
+    res.status(500).send({ message: "Failed to update the campaign" });
+  }
+});
+
+
 
 } finally {
   // Ensures that the client will close when you finish/error
