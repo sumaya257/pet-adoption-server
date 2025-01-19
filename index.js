@@ -5,6 +5,11 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const morgan = require('morgan')
 
+
+
+// This is your test secret API key.
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
 const app = express();
 const port = process.env.PORT || 5000;
 // middleware
@@ -30,6 +35,7 @@ async function run() {
     const addedPetCollection = client.db('petAdoption').collection('addedPets')
     const addedDonationCollection = client.db('petAdoption').collection('addedDonations')
     const adoptPetCollection = client.db('petAdoption').collection('adoptPets')
+    const paymentCollection = client.db('petAdoption').collection('paymentCollections')
 
 
 
@@ -96,6 +102,38 @@ async function run() {
     const email = req.query.email
     const myDonations = await addedDonationCollection.find({ email: email }).toArray()
     res.send(myDonations)
+    console.log(myDonations)
+  })
+
+  /// Endpoint to get all donations with conditional paused filtering
+app.get('/donations', async (req, res) => {
+  try {
+    const { paused } = req.query; // Extract 'paused' from query string
+
+    let query = {}; // Default query returns all donations
+
+    // If 'paused' is provided in the query, filter based on its value
+    if (paused !== undefined) {
+      query.paused = paused === 'true'; // Converts 'true'/'false' to boolean
+    }
+
+    // Fetch donations from the database with the constructed query
+    const donations = await addedDonationCollection.find(query).toArray();
+
+    // Send the donations to the frontend
+    res.status(200).send(donations);
+  } catch (error) {
+    console.error('Error fetching donations:', error);
+    res.status(500).send({ message: 'Internal Server Error' });
+  }
+});
+
+
+  //fetch donation by id
+  app.get('/donation-details/:id',async(req,res)=>{
+    const donationId = new ObjectId(req.params.id)
+    const result = await addedDonationCollection.findOne({_id:donationId})
+    return res.send(result)
   })
 
 
@@ -140,11 +178,7 @@ async function run() {
   })
   
 
-  //fetch donations
-  app.get('/donations/my-campaigns',async(req,res)=>{
-    const result = await addedDonationCollection.find().toArray()
-    res.send(result)
-  })
+  
 
   // Delete pet by ID
   app.delete('/pets/:id', async (req, res) => {
@@ -237,6 +271,45 @@ app.put('/dashboard/update-donation/:id', async (req, res) => {
     res.status(500).send({ message: "Failed to update the campaign" });
   }
 });
+
+//payment intent
+
+app.post('/create-payment-intent', async (req, res) => {
+  try {
+      const { amount } = req.body;
+      console.log(amount)
+
+      // Validate the payment
+      if (!amount || isNaN(amount) || amount <= 0) {
+          return res.status(400).send({ error: 'Invalid payment. Please provide a valid amount.' });
+      }
+
+      console.log(amount, 'amount inside the intent');
+
+      // Create a payment intent
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+          currency: 'usd',
+          payment_method_types: ['card'], // Optional: Specify payment methods
+      });
+
+      // Send the client secret to the frontend
+      res.send({
+          clientSecret: paymentIntent.client_secret,
+      });
+  } catch (error) {
+      console.error('Error creating payment intent:', error);
+      res.status(500).send({ error: 'Failed to create payment intent. Please try again later.' });
+  }
+});
+
+//confirm payment
+app.post('/payments', async (req, res) => {
+  const payment = req.body;
+  const paymentResult = await paymentCollection.insertOne(payment);
+  res.send(paymentResult);
+})
+
 
 
 
