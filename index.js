@@ -6,7 +6,6 @@ require('dotenv').config();
 const morgan = require('morgan')
 
 
-
 // This is your test secret API key.
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
@@ -16,7 +15,6 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'))
-
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ju1bs.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -36,7 +34,6 @@ async function run() {
     const addedDonationCollection = client.db('petAdoption').collection('addedDonations')
     const adoptPetCollection = client.db('petAdoption').collection('adoptPets')
     const paymentCollection = client.db('petAdoption').collection('paymentCollections')
-
 
 
     //users related api
@@ -64,13 +61,57 @@ async function run() {
       return res.send(result)
     })
 
+    app.get('/adopt-pet',async(req,res)=>{
+      const email = req.query.email
+      const adoptionRequest = await adoptPetCollection.find({ email: email }).toArray()
+      res.send(adoptionRequest)
+      console.log(adoptionRequest)
+    })
+
+    // Route to handle both accept and reject
+    app.patch('/adopt-pet/:id', async (req, res) => {
+      try {
+        const { id } = req.params; // Extract the request ID
+        const { action } = req.body; // Action type (either 'accept' or 'reject')
+    
+        // Validate action
+        if (!['accept', 'reject'].includes(action)) {
+          return res.status(400).send({ message: 'Invalid action type' });
+        }
+    
+        // Create the filter object using ObjectId for MongoDB
+        const filter = { _id: new ObjectId(id) };
+    
+        // Create the update operation based on action type
+        let update;
+        if (action === 'accept') {
+          update = { $set: { status: 'accepted' } };
+        } else if (action === 'reject') {
+          update = { $set: { status: 'rejected' } };
+        }
+    
+        // Perform the update
+        const result = await adoptPetCollection.updateOne(filter, update);
+    
+        // If no document was updated, send a 404 response
+        if (result.modifiedCount === 0) {
+          return res.status(404).send({ message: 'Request not found or already updated' });
+        }
+    
+        // Send a success response
+        res.status(200).send({ message: `Request ${action}ed successfully!` });
+      } catch (error) {
+        console.error('Error handling request:', error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
     // added donations
     app.post('/donations',async(req,res)=>{
       const donation = req.body
       const result = await addedDonationCollection.insertOne(donation)
       return res.send(result)
     })
-
 
   // Fetch paginated pets
   app.get('/pets/my-pets', async (req, res) => {
@@ -128,13 +169,64 @@ app.get('/donations', async (req, res) => {
   }
 });
 
-
   //fetch donation by id
   app.get('/donation-details/:id',async(req,res)=>{
     const donationId = new ObjectId(req.params.id)
     const result = await addedDonationCollection.findOne({_id:donationId})
     return res.send(result)
   })
+
+  //aggregate data foe specific id
+  app.get("/donations/:campaignId/donators", async (req, res) => {
+    try {
+        const { campaignId } = req.params;
+
+        // Aggregate data for the specified campaignId
+        const campaignDetails = await paymentCollection.aggregate([
+            { 
+                $match: { campaignId }  // Match donations for the campaign
+            },
+            {
+                $group: {
+                    _id: "$campaignId",  // Group by campaignId
+                    totalDonation: {
+                        $sum: { 
+                            $toDouble: "$donationAmount" 
+                        }  // Sum donation amounts
+                    },
+                    donators: {
+                        $push: {
+                            name: "$userName",  // Corrected field name for userName
+                            amount: { 
+                                $toDouble: "$donationAmount" 
+                            }  // Corrected field name for donationAmount
+                        }
+                    }
+                }
+            }
+        ]).toArray();
+
+        console.log('Aggregated Campaign Details:', campaignDetails);  // Debugging the result
+
+        // Handle the case when no donations exist for the campaign
+        if (campaignDetails.length === 0) {
+            return res.json({
+                totalDonation: 0,
+                donators: [],
+            });
+        }
+
+        // Send the aggregated result
+        return res.json({
+            totalDonation: campaignDetails[0].totalDonation || 0,  // Default to 0 if undefined
+            donators: campaignDetails[0].donators || [],  // Default to empty array if undefined
+        });
+    } catch (error) {
+        console.error("Error fetching campaign details:", error);
+        return res.status(500).json({ error: "Failed to fetch campaign details" });
+    }
+});
+
 
 
   app.get('/pets', async (req, res) => {
@@ -203,7 +295,7 @@ app.get('/donations', async (req, res) => {
    })
 
    app.get('/donations/:id',async(req,res)=>{
-    const donationId = new ObjectId(req.params.id);
+    const donationId = req.params.id;
     const query = {_id: new ObjectId(donationId)}
     const result = await addedDonationCollection.findOne(query)
     res.send(result)
@@ -227,7 +319,6 @@ app.get('/donations', async (req, res) => {
   /// Patch route to update pet adoption status
 app.patch('/pets/:petId', async (req, res) => {
   const { petId } = req.params;
-
 
   try {
     // Update adopted status for the pet in the database
@@ -310,6 +401,37 @@ app.post('/payments', async (req, res) => {
   res.send(paymentResult);
 })
 
+app.get('/payments/my-donations', async (req, res) => {
+  const email = req.query.email; // Get the email from query parameters
+  console.log("Email:", email); // Check if the email is correctly received
+  
+  try {
+    const myDonations = await paymentCollection.find({ userEmail: email }).toArray();
+    res.send(myDonations);
+    console.log(myDonations);
+  } catch (error) {
+    // If there's an error, send an error message
+    res.status(500).send({ message: 'Error fetching donations', error: error.message });
+  }
+});
+
+//refund
+app.delete('/payments/refund/:id', async (req, res) => {
+  try {
+    const paymentId = new ObjectId(req.params.id);
+    const result = await paymentCollection.deleteOne({ _id: paymentId });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send('Pet not found');
+    }
+    res.send('Pet deleted successfully');
+  } catch (err) {
+    res.status(500).send('Error deleting pet');
+  }
+});
+
+
+
 
 
 
@@ -322,7 +444,6 @@ app.post('/payments', async (req, res) => {
 run().catch(console.dir);
 
 
-
 app.get('/', (req, res) => {
     res.send('Hello from my server')
 })
@@ -330,3 +451,7 @@ app.get('/', (req, res) => {
 app.listen(port, () => {
     console.log('My simple server is running at', port);
 })
+
+
+ 
+
