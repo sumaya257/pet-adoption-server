@@ -58,13 +58,28 @@ async function run() {
       })
     }
 
-    app.get('/users/admin/:email', verifyToken, async (req, res) => {
+     // use verify admin after verifyToken
+     const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      const isAdmin = user?.role === 'admin';
+      if (!isAdmin) {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+      next();
+    }
+   // users related api
+    app.get('/users', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    });
+   app.get('/users/admin/:email', verifyToken, async (req, res) => {
       const email = req.params.email;
 
       if (email !== req.decoded.email) {
         return res.status(403).send({ message: 'forbidden access' })
       }
-
       const query = { email: email };
       const user = await userCollection.findOne(query);
       let admin = false;
@@ -87,11 +102,6 @@ async function run() {
          return res.send(result)
     })
 
-    app.get('/users',verifyToken,async(req,res)=>{
-    const users = await userCollection.find().toArray()
-        res.send(users)
-  })
-
   app.patch('/users/admin/:id', async (req, res) => {
     const id  = req.params.id;
     const filter = {_id:new ObjectId(id)}
@@ -111,15 +121,50 @@ async function run() {
       return res.send(result)
     })
 
+    //admin-all-pets
+    app.get('/pets', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await addedPetCollection.find().toArray();
+      res.send(result);
+    });
+    //admin-all-pets-delete
+    // app.delete('/pets/:id', async (req, res) => {
+    //   try {
+    //     const petId = new ObjectId(req.params.id);
+    //     const result = await addedPetCollection.deleteOne({ _id: petId });
+  
+    //     if (result.deletedCount === 0) {
+    //       return res.status(404).send('Pet not found');
+    //     }
+    //     res.send('Pet deleted successfully');
+    //   } catch (err) {
+    //     res.status(500).send('Error deleting pet');
+    //   }
+    // });
+
+
     app.post('/adopt-pet',async(req,res)=>{
-      const adoptPet = req.body
-      const result = await adoptPetCollection.insertOne(adoptPet)
+      const data = req.body
+       // Find the pet's email from the addpets collection
+     const matchingPet = await addedPetCollection.findOne({ _id: new ObjectId(data.petId) });
+
+    if (!matchingPet) {
+      return res.status(404).json({ error: "Pet not found in addpets collection" });
+    }
+    // Include the email from addpets in the adoption data
+    const adoptionData = {
+      ...data,
+      authorEmail: matchingPet.email, // Include email from addpets
+    };
+    // Save to adopt-pets collection
+    const result = await adoptPetCollection.insertOne(adoptionData);
+      console.log(result)
       return res.send(result)
     })
 
     app.get('/adopt-pet',async(req,res)=>{
       const email = req.query.email
-      const adoptionRequest = await adoptPetCollection.find({ email: email }).toArray()
+      const adoptionRequest = await adoptPetCollection.find({ 
+        authorEmail: email }).toArray()
       res.send(adoptionRequest)
       console.log(adoptionRequest)
     })
@@ -170,7 +215,7 @@ async function run() {
     })
 
   // Fetch paginated pets
-  app.get('/pets/my-pets', async (req, res) => {
+  app.get('/pets/my-pets',verifyToken, async (req, res) => {
     const email = req.query.email
     const page = parseInt(req.query.page) || 0;
     const limit = parseInt(req.query.limit) || 10;
