@@ -35,6 +35,44 @@ async function run() {
     const adoptPetCollection = client.db('petAdoption').collection('adoptPets')
     const paymentCollection = client.db('petAdoption').collection('paymentCollections')
 
+     // jwt related api
+    app.post('/jwt', async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+      res.send({ token });
+    })
+
+     // middlewares 
+     const verifyToken = (req, res, next) => {
+      // console.log('inside verify token', req.headers.authorization);
+      if (!req.headers.authorization) {
+        return res.status(401).send({ message: 'unauthorized access' });
+      }
+      const token = req.headers.authorization.split(' ')[1];
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+          return res.status(401).send({ message: 'unauthorized access' })
+        }
+        req.decoded = decoded;
+        next();
+      })
+    }
+
+    app.get('/users/admin/:email', verifyToken, async (req, res) => {
+      const email = req.params.email;
+
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: 'forbidden access' })
+      }
+
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      let admin = false;
+      if (user) {
+        admin = user?.role === 'admin';
+      }
+      res.send({ admin });
+    })
 
     //users related api
     app.post('/users',async(req,res)=>{
@@ -48,6 +86,24 @@ async function run() {
         const result = await userCollection.insertOne(user)
          return res.send(result)
     })
+
+    app.get('/users',verifyToken,async(req,res)=>{
+    const users = await userCollection.find().toArray()
+        res.send(users)
+  })
+
+  app.patch('/users/admin/:id', async (req, res) => {
+    const id  = req.params.id;
+    const filter = {_id:new ObjectId(id)}
+    const updateDoc = {
+      $set:{
+        role:'admin'
+      }
+    }
+    const result = await userCollection.updateOne(filter,updateDoc)
+    res.send(result)
+});
+
 
     app.post('/pets',async(req,res)=>{
       const pet = req.body
@@ -183,30 +239,30 @@ app.get('/donations', async (req, res) => {
 
         // Aggregate data for the specified campaignId
         const campaignDetails = await paymentCollection.aggregate([
-            { 
-                $match: { campaignId }  // Match donations for the campaign
+            {
+                $match: { campaignId } // Match donations for the campaign
             },
             {
                 $group: {
-                    _id: "$campaignId",  // Group by campaignId
+                    _id: "$campaignId", // Group by campaignId
                     totalDonation: {
-                        $sum: { 
-                            $toDouble: "$donationAmount" 
-                        }  // Sum donation amounts
+                        $sum: {
+                            $toDouble: "$donationAmount"
+                        } // Sum donation amounts
                     },
                     donators: {
                         $push: {
-                            name: "$userName",  // Corrected field name for userName
-                            amount: { 
-                                $toDouble: "$donationAmount" 
-                            }  // Corrected field name for donationAmount
+                            name: "$userName", // Corrected field name for userName
+                            amount: {
+                                $toDouble: "$donationAmount"
+                            } // Corrected field name for donationAmount
                         }
                     }
                 }
             }
         ]).toArray();
 
-        console.log('Aggregated Campaign Details:', campaignDetails);  // Debugging the result
+        console.log("Aggregated Campaign Details:", campaignDetails); // Debugging the result
 
         // Handle the case when no donations exist for the campaign
         if (campaignDetails.length === 0) {
@@ -216,16 +272,36 @@ app.get('/donations', async (req, res) => {
             });
         }
 
-        // Send the aggregated result
+        // Extract totalDonation and donators from the aggregation result
+        const { totalDonation, donators } = campaignDetails[0] || { totalDonation: 0, donators: [] };
+        console.log('Total Donation:', totalDonation);
+
+        // Update the campaign summary in a separate collection (only update totalDonation)
+        const result = await addedDonationCollection.updateOne(
+            { campaignId }, // Match the campaignId
+            {
+                $set: {
+                    campaignId, // Ensure the campaignId is stored
+                    totalDonation, // Store the aggregated total donation
+                    lastUpdated: new Date() // Timestamp of the last update
+                },
+            },
+            { upsert: true } // Insert a new document if it doesn't exist
+        );
+        console.log("Update Result:", result);
+
+        // Send the aggregated result as a response
         return res.json({
-            totalDonation: campaignDetails[0].totalDonation || 0,  // Default to 0 if undefined
-            donators: campaignDetails[0].donators || [],  // Default to empty array if undefined
+            totalDonation: totalDonation || 0, // Default to 0 if undefined
+            donators: donators || [], // Default to empty array if undefined
         });
     } catch (error) {
         console.error("Error fetching campaign details:", error);
         return res.status(500).json({ error: "Failed to fetch campaign details" });
     }
 });
+
+
 
 
 
