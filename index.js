@@ -126,21 +126,6 @@ async function run() {
       const result = await addedPetCollection.find().toArray();
       res.send(result);
     });
-    //admin-all-pets-delete
-    // app.delete('/pets/:id', async (req, res) => {
-    //   try {
-    //     const petId = new ObjectId(req.params.id);
-    //     const result = await addedPetCollection.deleteOne({ _id: petId });
-  
-    //     if (result.deletedCount === 0) {
-    //       return res.status(404).send('Pet not found');
-    //     }
-    //     res.send('Pet deleted successfully');
-    //   } catch (err) {
-    //     res.status(500).send('Error deleting pet');
-    //   }
-    // });
-
 
     app.post('/adopt-pet',async(req,res)=>{
       const data = req.body
@@ -168,6 +153,8 @@ async function run() {
       res.send(adoptionRequest)
       console.log(adoptionRequest)
     })
+
+
 
     // Route to handle both accept and reject
     app.patch('/adopt-pet/:id', async (req, res) => {
@@ -213,6 +200,13 @@ async function run() {
       const result = await addedDonationCollection.insertOne(donation)
       return res.send(result)
     })
+
+    //get-donations-for-admin
+    app.get('/donations/admin', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await addedDonationCollection.find().toArray();
+      res.send(result);
+    });
+
 
   // Fetch paginated pets
   app.get('/pets/my-pets',verifyToken, async (req, res) => {
@@ -347,41 +341,43 @@ app.get('/donations', async (req, res) => {
 });
 
 
+app.get('/pets/search', async (req, res) => {
+  const { search = '', category = '', adopted } = req.query;
 
+  // Prepare filter object
+  const filter = {};
 
+  // Add search filter if a search term is provided
+  if (search) {
+    filter.name = { $regex: search, $options: 'i' }; // Case-insensitive search on pet name
+  }
 
-  app.get('/pets', async (req, res) => {
-    const { search = '', category = '', adopted } = req.query;
-  
-    // Prepare filter object
-    const filter = {};
-  
-    // Add search filter if a search term is provided
-    if (search) {
-      filter.name = { $regex: search, $options: 'i' }; // Case-insensitive search on pet name
-    }
-  
-    // Add category filter if provided
-    if (category) {
-      filter.category = category;
-    }
-  
-    // Add adopted status filter if provided (expecting a boolean value)
-    if (adopted !== undefined) {
-      // Convert 'adopted' to a boolean value (false -> false, true -> true)
-      filter.adopted = adopted === 'true'; // 'true' string to boolean true, 'false' string to boolean false
-    }
-  
-    try {
-      // Fetch all pets based on the filter, without pagination
-      const pets = await addedPetCollection.find(filter).toArray();
-  
-      // Send the response with all matching pets
-      res.json(pets);
-    } catch (err) {
-      res.status(500).send('Error fetching pets');
-    }
-  });
+  // Add category filter if provided
+  if (category) {
+    filter.category = category;
+  }
+
+  // Add adopted status filter if provided (expecting a boolean value)
+  if (adopted !== undefined) {
+    filter.adopted = adopted === 'true'; // Convert 'true' or 'false' to boolean
+  }
+
+  console.log('Query Params:', req.query); // Debugging
+  console.log('Constructed Filter:', filter); // Debugging
+
+  try {
+    // Fetch all pets based on the filter
+    const pets = await addedPetCollection.find(filter).toArray();
+
+    // Send the response with all matching pets
+    res.json(pets);
+    console.log('Pets Returned:', pets);
+  } catch (err) {
+    console.error('Error fetching pets:', err);
+    res.status(500).send('Error fetching pets');
+  }
+});
+
 
   //fetch-pet-by-id
   app.get('/pet-listing/:id',async(req,res)=>{
@@ -460,27 +456,43 @@ app.patch('/pets/:petId', async (req, res) => {
 app.put('/dashboard/update-donation/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const updatedFields = req.body; // Get the fields to update from the request body
+    const updatedFields = req.body; // Fields to update from the request body
+
+    // Update the specific fields
+    const result = await addedDonationCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedFields }
+    );
+
+    res.send(result);
+  }  catch (error) {
+    console.error("Error updating campaign:", error);
+    res.status(500).send({ message: "Failed to update the campaign" });
+  }
+});
+
+// Toggle the 'paused' field of the donation campaign
+app.put('/dashboard/toggle-donation-paused/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
 
     // Find the existing campaign
     const campaign = await addedDonationCollection.findOne({ _id: new ObjectId(id) });
 
-    // Merge updated fields with the toggled 'paused' field
-    const updatedData = {
-      ...updatedFields,
-      paused: updatedFields.paused !== undefined ? updatedFields.paused : !campaign.paused, // Toggle paused if not explicitly set
-    };
+    if (!campaign) {
+      return res.status(404).send({ error: 'Campaign not found' });
+    }
 
-    // Update the campaign
+    // Toggle the 'paused' field
     const result = await addedDonationCollection.updateOne(
       { _id: new ObjectId(id) },
-      { $set: updatedData }
+      { $set: { paused: !campaign.paused } }
     );
 
     res.send(result);
   } catch (error) {
-    console.error("Error updating campaign:", error);
-    res.status(500).send({ message: "Failed to update the campaign" });
+    console.error('Error toggling paused status:', error);
+    res.status(500).send({ error: 'Failed to toggle paused status' });
   }
 });
 
@@ -550,7 +562,6 @@ app.delete('/payments/refund/:id', async (req, res) => {
     res.status(500).send('Error deleting pet');
   }
 });
-
 
 
 
